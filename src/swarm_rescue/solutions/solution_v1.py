@@ -169,12 +169,11 @@ class DroneSolutionV1(DroneAbstract):
     def gps_mapping(self):
         self.step_count += 1
         if self.lidar().get_sensor_values() is not None:
-            angles = np.array(self.lidar().ray_angles)
-            angles += self.measured_compass_angle()
+            angles = np.array(self.lidar().ray_angles) + self.measured_compass_angle()
             distances = np.array(self.lidar().get_sensor_values())
             edge_distance_positions = []
             for (i, dist) in enumerate(distances):
-                if dist <= 290: # maximum lidar
+                if dist <= 290: # maximum lidar - gaussian noise
                     edge_distance_positions.append(i)
             edge_distances = np.array([distances[i] for i in edge_distance_positions])
             edge_angles = np.array([angles[i] for i in edge_distance_positions])
@@ -194,7 +193,7 @@ class DroneSolutionV1(DroneAbstract):
             #     plt.draw()
             #     plt.pause(0.001)
 
-    def get_lidar_from_occupancy(self, position, angle, threshold = 0.1):
+    def get_lidar_from_occupancy(self, position, angle, threshold = 0):
         lidar = np.array([300 for _ in range(181)])
         # cur_cell = self.pos_to_grid(position)
 
@@ -205,7 +204,7 @@ class DroneSolutionV1(DroneAbstract):
             for d in range(1, 300):
                 next_position = (position[0] + d*cos_angle, position[1] + d*sin_angle)
                 next_cell = self.pos_to_grid(next_position)
-                if self.occupancy_map[next_cell[0]][next_cell[1]] > 0:
+                if self.occupancy_map[next_cell[0]][next_cell[1]] > threshold:
                     lidar[i] = d
                     break
                 
@@ -237,7 +236,8 @@ class DroneSolutionV1(DroneAbstract):
                    "grasper": 0}
 
         self.gps_mapping()
-        self.get_lidar_from_occupancy(self.measured_gps_position(), self.measured_compass_angle())
+        if self.step_count % 10 == 0:
+            self.get_lidar_from_occupancy(self.measured_gps_position(), self.measured_compass_angle())
         
         if self.start:
             self.start = False
