@@ -61,6 +61,8 @@ class DroneSolutionV1(DroneAbstract):
         self.scale = 5
         self.occupancy_map_size = 300
         self.occupancy_map = np.zeros((self.occupancy_map_size, self.occupancy_map_size))
+        self.prev_angle = 0
+        self.prev_position = [0, 0]
         # state: finding people or taking people back
         # flag: to help with going 
 
@@ -82,7 +84,7 @@ class DroneSolutionV1(DroneAbstract):
     def measured_fake_angle(self):
         return self.measured_compass_angle() or self.angle1
 
-    def measeured_fake_position(self):
+    def measured_fake_position(self):
         return self.measured_gps_position() or self.position1        
 
     def torad(self, i):
@@ -187,7 +189,7 @@ class DroneSolutionV1(DroneAbstract):
     def gps_mapping(self):
         self.step_count += 1
         if self.lidar().get_sensor_values() is not None:
-            x, y = self.get_absolute_position_lidar(self.lidar().get_sensor_values(), self.measeured_fake_position(), self.measured_fake_angle())
+            x, y = self.get_absolute_position_lidar(self.lidar().get_sensor_values(), self.measured_fake_position(), self.measured_fake_angle())
             for i in range(len(x)):
                 cur_cell = self.pos_to_grid((x[i], y[i]))
                 self.occupancy_map[cur_cell[0]][cur_cell[1]] = self.occupancy_map[cur_cell[0]][cur_cell[1]]+1
@@ -241,7 +243,7 @@ class DroneSolutionV1(DroneAbstract):
         - Translation matrix
         """
         X_prev, Y_prev = self.get_absolute_position_lidar(lidar_from_measure, self.prev_position, self.prev_angle, threshold=400)
-        X_cur, Y_cur = self.get_absolute_position_lidar(lidar_from_occupancy, self.measeured_fake_position(), self.measured_fake_angle(), threshold=400)
+        X_cur, Y_cur = self.get_absolute_position_lidar(lidar_from_occupancy, self.measured_fake_position(), self.measured_fake_angle(), threshold=400)
 
         previous_points = np.vstack((X_prev, Y_prev))
         current_points = np.vstack((X_cur, Y_cur))
@@ -263,7 +265,7 @@ class DroneSolutionV1(DroneAbstract):
 
         self.gps_mapping()
         if self.step_count % 10 == 0:
-            self.get_lidar_from_occupancy(self.measured_gps_position(), self.measured_compass_angle())
+            self.get_lidar_from_occupancy(self.measured_fake_position(), self.measured_fake_angle())
         
         if self.start:
             self.start = False
@@ -356,12 +358,12 @@ class DroneSolutionV1(DroneAbstract):
             self.counter = 0
         
         # print(self.prev_position, self.measeured_fake_position())
-        lidar_from_occupancy = self.get_lidar_from_occupancy(self.measeured_fake_position(), self.measured_fake_angle())
+        lidar_from_occupancy = self.get_lidar_from_occupancy(self.measured_fake_position(), self.measured_fake_angle())
         lidar_from_measure = self.lidar().get_sensor_values()
-        # print(self.correct(lidar_from_occupancy, lidar_from_measure))
+        print(self.correct(lidar_from_occupancy, lidar_from_measure))
 
         #update prev_angle
-        self.prev_position = self.measeured_fake_position()
+        self.prev_position = self.measured_fake_position()
         self.prev_angle = self.measured_fake_angle()
         
         # update angle1 and position1
