@@ -22,6 +22,7 @@ from typing import Type
 # This line add, to sys.path, the path to parent path of this file
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from tools.icp import icp_matching
 from spg_overlay.entities.drone_abstract import DroneAbstract
 from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 from spg_overlay.entities.rescue_center import RescueCenter, wounded_rescue_center_collision
@@ -59,6 +60,9 @@ class DroneSolutionV1(DroneAbstract):
         self.scale = 5
         self.occupancy_map_size = 300
         self.occupancy_map = np.array([[0 for _ in range(self.occupancy_map_size)] for _ in range(self.occupancy_map_size)])
+
+        self.prev_angle = 0
+        self.prev_position = [0, 0]
         # state: finding people or taking people back
         # flag: to help with going 
 
@@ -165,33 +169,38 @@ class DroneSolutionV1(DroneAbstract):
     def pos_to_grid(self, pos):
         return (int((self.occupancy_map_size + pos[0])/self.scale),
                 int((self.occupancy_map_size + pos[1])/self.scale))
-    
+
+    def get_absolute_position_lidar(self, lidar, current_position, current_angle, threshold=290):
+        angles = np.array(self.lidar().ray_angles) + current_angle
+        distances = np.array(lidar)
+        edge_distance_positions = []
+        for (i, dist) in enumerate(distances):
+            if dist <= threshold: # maximum lidar - gaussian noise
+                edge_distance_positions.append(i)
+        edge_distances = np.array([distances[i] for i in edge_distance_positions])
+        edge_angles = np.array([angles[i] for i in edge_distance_positions])
+        cur_x, cur_y = current_position
+        # Absolute position of lidar points on the map
+        x = edge_distances * np.cos(edge_angles) + cur_x
+        y = edge_distances * np.sin(edge_angles) + cur_y    
+        return (x, y)
+
+
     def gps_mapping(self):
         self.step_count += 1
         if self.lidar().get_sensor_values() is not None:
-            angles = np.array(self.lidar().ray_angles) + self.measured_compass_angle()
-            distances = np.array(self.lidar().get_sensor_values())
-            edge_distance_positions = []
-            for (i, dist) in enumerate(distances):
-                if dist <= 290: # maximum lidar - gaussian noise
-                    edge_distance_positions.append(i)
-            edge_distances = np.array([distances[i] for i in edge_distance_positions])
-            edge_angles = np.array([angles[i] for i in edge_distance_positions])
-            cur_x, cur_y = self.measured_gps_position()
-            # Absolute position of lidar points on the map
-            x = edge_distances * np.cos(edge_angles) + cur_x
-            y = edge_distances * np.sin(edge_angles) + cur_y    
+            x, y = self.get_absolute_position_lidar(self.lidar().get_sensor_values(), self.measeured_fake_position(), self.measured_fake_angle())
             for i in range(len(x)):
                 cur_cell = self.pos_to_grid((x[i], y[i]))
                 self.occupancy_map[cur_cell[0]][cur_cell[1]] = self.occupancy_map[cur_cell[0]][cur_cell[1]]+1
 
-            # # Heatmap for occupancy maps
-            # if self.step_count % 100 == 0:
-            #     plt.imshow(self.occupancy_map.T, cmap='hot', interpolation='nearest')
-            #     plt.gca().invert_yaxis()
-            #     # plt.ylim(ymin=0)
-            #     plt.draw()
-            #     plt.pause(0.001)
+            # Heatmap for occupancy maps
+            if self.step_count % 100 == 0:
+                plt.imshow(self.occupancy_map.T, cmap='hot', interpolation='nearest')
+                plt.gca().invert_yaxis()
+                # plt.ylim(ymin=0)
+                plt.draw()
+                plt.pause(0.001)
 
     def get_lidar_from_occupancy(self, position, angle, threshold = 0):
         lidar = np.array([300 for _ in range(181)])
@@ -222,7 +231,26 @@ class DroneSolutionV1(DroneAbstract):
         # plt.pause(0.001)
         return lidar
 
-        
+    def correct(self, lidar_from_occupancy, lidar_from_measure):
+        """
+        Correct the new measurement to align it to the previous measurement.
+        Need:
+        - Absolute value of lidar_from_occupancy
+        - Absolute value of lidar_from_measure
+        -> ICP translate from lidar_from_occupancy to the lidar_from_measure 
+        Return:
+        - Rotational matrix
+        - Translation matrix
+        """
+        X_prev, Y_prev = self.get_absolute_position_lidar(lidar_from_measure, self.prev_position, self.prev_angle, threshold=400)
+        X_cur, Y_cur = self.get_absolute_position_lidar(lidar_from_occupancy, self.measeured_fake_position(), self.measured_fake_angle(), threshold=400)
+
+        previous_points = np.vstack((X_prev, Y_prev))
+        current_points = np.vstack((X_cur, Y_cur))
+
+        R, t = icp_matching(previous_points, current_points)
+        return R, t
+
     def define_message_for_all(self):
         """
         Here, we don't need communication...
@@ -328,7 +356,16 @@ class DroneSolutionV1(DroneAbstract):
             self.state = 0
             self.flag = 0
             self.counter = 0
+        
+        # print(self.prev_position, self.measeured_fake_position())
+        lidar_from_occupancy = self.get_lidar_from_occupancy(self.measeured_fake_position(), self.measured_fake_angle())
+        lidar_from_measure = self.lidar().get_sensor_values()
+        # print(self.correct(lidar_from_occupancy, lidar_from_measure))
 
+        #update prev_angle
+        self.prev_position = self.measeured_fake_position()
+        self.prev_angle = self.measured_fake_angle()
+        
         # update angle1 and position1
         odo = self.odometer_values()
         self.angle1 += odo[-1]

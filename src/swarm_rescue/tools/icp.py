@@ -13,7 +13,7 @@ import numpy as np
 EPS = 0.0001
 MAX_ITER = 100
 
-show_animation = True
+show_animation = False
 
 
 def icp_matching(previous_points, current_points):
