@@ -44,9 +44,15 @@ class DroneSolutionV1(DroneAbstract):
         self.counter = 0
         self.goal = [0, 0]
         self.angle1 = 0
+        self.gps1 = [0, 0] 
         self.limit = 0
         self.pending = 0
         self.data = []
+
+        self.step_count = 0
+        self.scale = 5
+        self.occupancy_map_size = 300
+        self.occupancy_map = np.array([[0 for _ in range(self.occupancy_map_size)] for _ in range(self.occupancy_map_size)])
         # state: finding people or taking people back
         # flag: to help with going 
 
@@ -66,7 +72,10 @@ class DroneSolutionV1(DroneAbstract):
         return touched
     
     def measured_fake_angle(self):
-        return self.measured_compass_angle() or self.angle1        
+        return self.measured_compass_angle() or self.angle1
+
+    def measeured_fake_position(self):
+        return self.measured_gps_position() or self.gps1        
 
     def torad(self, i):
         return (i-90)/90*math.pi
@@ -146,7 +155,69 @@ class DroneSolutionV1(DroneAbstract):
         if not a: return False, [0, 0]
         b = [normalize_angle(b[0]+float(self.measured_fake_angle())), b[1]]
         return True, b
+    
+    def pos_to_grid(self, pos):
+        return (int((self.occupancy_map_size + pos[0])/self.scale),
+                int((self.occupancy_map_size + pos[1])/self.scale))
+    
+    def gps_mapping(self):
+        self.step_count += 1
+        if self.lidar().get_sensor_values() is not None:
+            angles = np.array(self.lidar().ray_angles)
+            angles += self.measured_compass_angle()
+            distances = np.array(self.lidar().get_sensor_values())
+            edge_distance_positions = []
+            for (i, dist) in enumerate(distances):
+                if dist <= 290: # maximum lidar
+                    edge_distance_positions.append(i)
+            edge_distances = np.array([distances[i] for i in edge_distance_positions])
+            edge_angles = np.array([angles[i] for i in edge_distance_positions])
+            cur_x, cur_y = self.measured_gps_position()
+            # Absolute position of lidar points on the map
+            x = edge_distances * np.cos(edge_angles) + cur_x
+            y = edge_distances * np.sin(edge_angles) + cur_y    
+            for i in range(len(x)):
+                cur_cell = self.pos_to_grid((x[i], y[i]))
+                self.occupancy_map[cur_cell[0]][cur_cell[1]] = self.occupancy_map[cur_cell[0]][cur_cell[1]]+1
 
+            # # Heatmap for occupancy maps
+            # if self.step_count % 100 == 0:
+            #     plt.imshow(self.occupancy_map.T, cmap='hot', interpolation='nearest')
+            #     plt.gca().invert_yaxis()
+            #     # plt.ylim(ymin=0)
+            #     plt.draw()
+            #     plt.pause(0.001)
+
+    def get_lidar_from_occupancy(self, position, angle, threshold = 0.1):
+        lidar = np.array([300 for _ in range(181)])
+        # cur_cell = self.pos_to_grid(position)
+
+        for i in range(0, 181):
+            rad_angle = math.pi + angle + math.radians(2*i)
+            cos_angle = math.cos(rad_angle)
+            sin_angle = math.sin(rad_angle)
+            for d in range(1, 300):
+                next_position = (position[0] + d*cos_angle, position[1] + d*sin_angle)
+                next_cell = self.pos_to_grid(next_position)
+                if self.occupancy_map[next_cell[0]][next_cell[1]] > 0:
+                    lidar[i] = d
+                    break
+                
+        # print(angle, '\n', lidar, '\n', self.lidar().get_sensor_values())
+        # print([int(i-j) for i, j in zip(lidar, self.lidar().get_sensor_values())])
+        # input()
+
+        # plt.figure(self.SensorType.LIDAR)
+        # # plt.figure(lidar)
+        # plt.cla()
+        # plt.axis([-500, 500, -500, 500])
+        # # plt.plot(x, y, "g.:")
+        # plt.grid(True)
+        # plt.draw()
+        # plt.pause(0.001)
+        return lidar
+
+        
     def define_message_for_all(self):
         """
         Here, we don't need communication...
@@ -159,6 +230,9 @@ class DroneSolutionV1(DroneAbstract):
                    "rotation": 0.0,
                    "grasper": 0}
 
+        self.gps_mapping()
+        self.get_lidar_from_occupancy(self.measured_gps_position(), self.measured_compass_angle())
+        
         if self.start:
             self.start = False
             return command
@@ -249,8 +323,11 @@ class DroneSolutionV1(DroneAbstract):
             self.flag = 0
             self.counter = 0
 
-        # update angle1
-        self.angle1 += self.odometer_values()[-1]
+        # update angle1 and position1
+        odo = self.odometer_values()
+        self.angle1 += odo[-1]
+        self.position[0] += odo[0]
+        self.position[1] += odo[1]
 
         # return
         return command
