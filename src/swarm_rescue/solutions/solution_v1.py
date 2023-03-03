@@ -58,7 +58,7 @@ class DroneSolutionV1(DroneAbstract):
         self.step_count = 0
         self.scale = 5
         self.occupancy_map_size = 300
-        self.occupancy_map = np.array([[0 for _ in range(self.occupancy_map_size)] for _ in range(self.occupancy_map_size)])
+        self.occupancy_map = np.zeros((self.occupancy_map_size, self.occupancy_map_size))
         # state: finding people or taking people back
         # flag: to help with going 
 
@@ -173,8 +173,11 @@ class DroneSolutionV1(DroneAbstract):
             distances = np.array(self.lidar().get_sensor_values())
             edge_distance_positions = []
             for (i, dist) in enumerate(distances):
-                if dist <= 290: # maximum lidar - gaussian noise
-                    edge_distance_positions.append(i)
+                if dist > 290: # maximum lidar - gaussian noise
+                    continue
+                if dist <= 25: # don't draw edges from a person that is grabbed
+                    continue
+                edge_distance_positions.append(i)
             edge_distances = np.array([distances[i] for i in edge_distance_positions])
             edge_angles = np.array([angles[i] for i in edge_distance_positions])
             cur_x, cur_y = self.measured_gps_position()
@@ -186,12 +189,11 @@ class DroneSolutionV1(DroneAbstract):
                 self.occupancy_map[cur_cell[0]][cur_cell[1]] = self.occupancy_map[cur_cell[0]][cur_cell[1]]+1
 
             # # Heatmap for occupancy maps
-            # if self.step_count % 100 == 0:
-            #     plt.imshow(self.occupancy_map.T, cmap='hot', interpolation='nearest')
-            #     plt.gca().invert_yaxis()
-            #     # plt.ylim(ymin=0)
-            #     plt.draw()
-            #     plt.pause(0.001)
+            if self.step_count % 100 == 0:
+                plt.imshow(self.occupancy_map.T, cmap='hot', interpolation='nearest')
+                plt.gca().invert_yaxis()
+                plt.draw()
+                plt.pause(0.001)
 
     def get_lidar_from_occupancy(self, position, angle, threshold = 0):
         lidar = np.array([300 for _ in range(181)])
