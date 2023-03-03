@@ -44,6 +44,7 @@ class DroneSolutionV1(DroneAbstract):
         self.counter = 0
         self.goal = [0, 0]
         self.angle1 = 0
+        self.gps1 = [0, 0] 
         self.limit = 0
         self.pending = 0
         self.data = []
@@ -71,7 +72,10 @@ class DroneSolutionV1(DroneAbstract):
         return touched
     
     def measured_fake_angle(self):
-        return self.measured_compass_angle() or self.angle1        
+        return self.measured_compass_angle() or self.angle1
+
+    def measeured_fake_position(self):
+        return self.measured_gps_position() or self.gps1        
 
     def torad(self, i):
         return (i-90)/90*math.pi
@@ -319,8 +323,11 @@ class DroneSolutionV1(DroneAbstract):
             self.flag = 0
             self.counter = 0
 
-        # update angle1
-        self.angle1 += self.odometer_values()[-1]
+        # update angle1 and position1
+        odo = self.odometer_values()
+        self.angle1 += odo[-1]
+        self.position[0] += odo[0]
+        self.position[1] += odo[1]
 
         # return
         return command
