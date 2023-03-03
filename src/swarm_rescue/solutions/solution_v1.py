@@ -15,6 +15,12 @@ import matplotlib.pyplot as plt
 from typing_extensions import ParamSpecKwargs
 import numpy as np
 from typing import Optional
+import os
+import sys
+from typing import Type
+
+# This line add, to sys.path, the path to parent path of this file
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from spg_overlay.entities.drone_abstract import DroneAbstract
 from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
@@ -44,7 +50,7 @@ class DroneSolutionV1(DroneAbstract):
         self.counter = 0
         self.goal = [0, 0]
         self.angle1 = 0
-        self.gps1 = [0, 0] 
+        self.position1 = [0, 0] 
         self.limit = 0
         self.pending = 0
         self.data = []
@@ -75,7 +81,7 @@ class DroneSolutionV1(DroneAbstract):
         return self.measured_compass_angle() or self.angle1
 
     def measeured_fake_position(self):
-        return self.measured_gps_position() or self.gps1        
+        return self.measured_gps_position() or self.position1        
 
     def torad(self, i):
         return (i-90)/90*math.pi
@@ -326,8 +332,8 @@ class DroneSolutionV1(DroneAbstract):
         # update angle1 and position1
         odo = self.odometer_values()
         self.angle1 += odo[-1]
-        self.position[0] += odo[0]
-        self.position[1] += odo[1]
+        self.position1[0] += odo[0]
+        self.position1[1] += odo[1]
 
         # return
         return command
