@@ -23,6 +23,7 @@ from typing import Type
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from tools.icp import icp_matching
+from tools.utils import enlarge
 from spg_overlay.entities.drone_abstract import DroneAbstract
 from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 from spg_overlay.entities.rescue_center import RescueCenter, wounded_rescue_center_collision
@@ -59,10 +60,7 @@ class DroneSolutionV1(DroneAbstract):
         self.step_count = 0
         self.scale = 5
         self.occupancy_map_size = 300
-        self.occupancy_map = np.array([[0 for _ in range(self.occupancy_map_size)] for _ in range(self.occupancy_map_size)])
-
-        self.prev_angle = 0
-        self.prev_position = [0, 0]
+        self.occupancy_map = np.zeros((self.occupancy_map_size, self.occupancy_map_size))
         # state: finding people or taking people back
         # flag: to help with going 
 
