@@ -19,6 +19,8 @@ from solutions.solution_v1 import DroneSolutionV1
 class MyMap(MyMapIntermediate01):
     pass
 
+class MyDrone(DroneSolutionV1):
+    pass
 
 class Launcher:
     def __init__(self):

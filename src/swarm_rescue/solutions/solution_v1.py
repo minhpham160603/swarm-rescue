@@ -22,6 +22,7 @@ from typing import Type
 # This line add, to sys.path, the path to parent path of this file
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from tools.utils import enlarge
 from spg_overlay.entities.drone_abstract import DroneAbstract
 from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 from spg_overlay.entities.rescue_center import RescueCenter, wounded_rescue_center_collision
@@ -185,13 +186,12 @@ class DroneSolutionV1(DroneAbstract):
                 cur_cell = self.pos_to_grid((x[i], y[i]))
                 self.occupancy_map[cur_cell[0]][cur_cell[1]] = self.occupancy_map[cur_cell[0]][cur_cell[1]]+1
 
-            # # Heatmap for occupancy maps
-            # if self.step_count % 100 == 0:
-            #     plt.imshow(self.occupancy_map.T, cmap='hot', interpolation='nearest')
-            #     plt.gca().invert_yaxis()
-            #     # plt.ylim(ymin=0)
-            #     plt.draw()
-            #     plt.pause(0.001)
+            # Heatmap for occupancy maps
+            if self.step_count % 100 == 0:
+                plt.imshow(self.occupancy_map.T, cmap='hot', interpolation='nearest')
+                plt.gca().invert_yaxis()
+                # plt.ylim(ymin=0)
+                plt.show()
 
     def get_lidar_from_occupancy(self, position, angle, threshold = 0):
         lidar = np.array([300 for _ in range(181)])
