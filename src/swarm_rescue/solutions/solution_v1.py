@@ -59,8 +59,11 @@ class DroneSolutionV1(DroneAbstract):
 
         self.step_count = 0
         self.scale = 5
-        self.occupancy_map_size = 300
+        self.occupancy_map_size = 100
         self.occupancy_map = np.zeros((self.occupancy_map_size, self.occupancy_map_size))
+        self.occupancy_map_dx = 0
+        self.occupancy_map_dy = 0
+
         self.prev_angle = 0
         self.prev_position = [0, 0]
         # state: finding people or taking people back
@@ -187,11 +190,15 @@ class DroneSolutionV1(DroneAbstract):
 
 
     def gps_mapping(self):
+        # print(self.step_count)
         self.step_count += 1
         if self.lidar().get_sensor_values() is not None:
             x, y = self.get_absolute_position_lidar(self.lidar().get_sensor_values(), self.measured_fake_position(), self.measured_fake_angle())
             for i in range(len(x)):
                 cur_cell = self.pos_to_grid((x[i], y[i]))
+                while cur_cell[0] >= len(self.occupancy_map) or cur_cell[1] >= len(self.occupancy_map[0]):
+                    self.occupancy_map, self.occupancy_map_dx, self.occupancy_map_dy = enlarge(self.occupancy_map)
+                    print(cur_cell[0], cur_cell[1], self.occupancy_map.shape)
                 self.occupancy_map[cur_cell[0]][cur_cell[1]] = self.occupancy_map[cur_cell[0]][cur_cell[1]]+1
 
             # Heatmap for occupancy maps
