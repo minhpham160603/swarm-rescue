@@ -13,17 +13,14 @@ from maps.map_complete_02 import MyMapComplete02
 from solutions.solution_v1 import DroneSolutionV1
 
 from solutions.my_drone_random import MyDroneRandom
+from solutions.solution_v1 import DroneSolutionV1
 
 
 class MyMap(MyMapIntermediate01):
     pass
 
-
-# class MyDrone(MyDroneRandom):
-#     pass
 class MyDrone(DroneSolutionV1):
     pass
-
 
 class Launcher:
     def __init__(self):

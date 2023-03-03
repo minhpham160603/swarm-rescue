@@ -22,6 +22,7 @@ from typing import Type
 # This line add, to sys.path, the path to parent path of this file
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+from tools.utils import enlarge
 from spg_overlay.entities.drone_abstract import DroneAbstract
 from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 from spg_overlay.entities.rescue_center import RescueCenter, wounded_rescue_center_collision
