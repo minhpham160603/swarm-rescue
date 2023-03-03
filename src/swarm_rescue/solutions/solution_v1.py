@@ -51,8 +51,10 @@ class DroneSolutionV1(DroneAbstract):
         self.lock = 0
         self.counter = 0
         self.goal = [0, 0]
+
         self.angle1 = 0
         self.position1 = [0, 0] 
+
         self.limit = 0
         self.pending = 0
         self.data = []
@@ -67,7 +69,12 @@ class DroneSolutionV1(DroneAbstract):
         self.prev_angle = 0
         self.prev_position = [0, 0]
         # state: finding people or taking people back
-        # flag: to help with going 
+        # flag: to help with going
+
+        # set dx and dy
+        x, y = self.measured_gps_position()
+        self.occupancy_map_dx = -int(x)//self.scale+self.occupancy_map_size//2
+        self.occupancy_map_dy = -int(y)//self.scale+self.occupancy_map_size//2
 
     def process_touch_sensor(self):
         """
@@ -88,7 +95,15 @@ class DroneSolutionV1(DroneAbstract):
         return self.measured_compass_angle() or self.angle1
 
     def measured_fake_position(self):
-        return self.measured_gps_position() or self.position1        
+        return self.measured_gps_position() or self.position1
+
+    def fix_fake_position(self):
+        try:
+            self.angle1 = self.measured_compass_angle()
+            a, b = self.measured_gps_position()
+            self.position1 = [a, b]     
+        except:
+            pass 
 
     def torad(self, i):
         return (i-90)/90*math.pi
@@ -170,8 +185,8 @@ class DroneSolutionV1(DroneAbstract):
         return True, b
     
     def pos_to_grid(self, pos):
-        return (int((self.occupancy_map_size + pos[0])/self.scale),
-                int((self.occupancy_map_size + pos[1])/self.scale))
+        return (int(pos[0])//self.scale+self.occupancy_map_dx,
+                int(pos[1])//self.scale+self.occupancy_map_dy)
 
     def get_absolute_position_lidar(self, lidar, current_position, current_angle, threshold=290):
         angles = np.array(self.lidar().ray_angles) + current_angle
@@ -195,11 +210,13 @@ class DroneSolutionV1(DroneAbstract):
         if self.lidar().get_sensor_values() is not None:
             x, y = self.get_absolute_position_lidar(self.lidar().get_sensor_values(), self.measured_fake_position(), self.measured_fake_angle())
             for i in range(len(x)):
-                cur_cell = self.pos_to_grid((x[i], y[i]))
-                while cur_cell[0] >= len(self.occupancy_map) or cur_cell[1] >= len(self.occupancy_map[0]):
-                    self.occupancy_map, self.occupancy_map_dx, self.occupancy_map_dy = enlarge(self.occupancy_map)
-                    print(cur_cell[0], cur_cell[1], self.occupancy_map.shape)
-                self.occupancy_map[cur_cell[0]][cur_cell[1]] = self.occupancy_map[cur_cell[0]][cur_cell[1]]+1
+                cur_x, cur_y = self.pos_to_grid((x[i], y[i]))
+                if not (0 <= cur_x < len(self.occupancy_map) and 0 <= cur_y < len(self.occupancy_map[0])):
+                    self.occupancy_map, del_x, del_y = enlarge(self.occupancy_map)
+                    self.occupancy_map_dx += del_x                    
+                    self.occupancy_map_dy += del_y
+                    print(cur_x, cur_y, self.occupancy_map.shape)
+                self.occupancy_map[cur_x][cur_y] = self.occupancy_map[cur_x][cur_y]+1
 
             # Heatmap for occupancy maps
             if self.step_count % 100 == 0:
