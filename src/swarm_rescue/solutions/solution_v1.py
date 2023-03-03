@@ -60,7 +60,7 @@ class DroneSolutionV1(DroneAbstract):
         self.data = []
 
         self.step_count = 0
-        self.scale = 5
+        self.scale = 3
         self.occupancy_map_size = 100
         self.occupancy_map = np.zeros((self.occupancy_map_size, self.occupancy_map_size))
         self.occupancy_map_dx = 0
@@ -71,6 +71,7 @@ class DroneSolutionV1(DroneAbstract):
         # state: finding people or taking people back
         # flag: to help with going
 
+    def init_dxy(self):
         # set dx and dy
         x, y = self.measured_gps_position()
         self.occupancy_map_dx = -int(x)//self.scale+self.occupancy_map_size//2
@@ -211,10 +212,11 @@ class DroneSolutionV1(DroneAbstract):
             x, y = self.get_absolute_position_lidar(self.lidar().get_sensor_values(), self.measured_fake_position(), self.measured_fake_angle())
             for i in range(len(x)):
                 cur_x, cur_y = self.pos_to_grid((x[i], y[i]))
-                if not (0 <= cur_x < len(self.occupancy_map) and 0 <= cur_y < len(self.occupancy_map[0])):
+                while not (0 <= cur_x < len(self.occupancy_map) and 0 <= cur_y < len(self.occupancy_map[0])):
                     self.occupancy_map, del_x, del_y = enlarge(self.occupancy_map)
                     self.occupancy_map_dx += del_x                    
                     self.occupancy_map_dy += del_y
+                    cur_x, cur_y = self.pos_to_grid((x[i], y[i]))
                     print(cur_x, cur_y, self.occupancy_map.shape)
                 self.occupancy_map[cur_x][cur_y] = self.occupancy_map[cur_x][cur_y]+1
 
@@ -234,12 +236,15 @@ class DroneSolutionV1(DroneAbstract):
             rad_angle = math.pi + angle + math.radians(2*i)
             cos_angle = math.cos(rad_angle)
             sin_angle = math.sin(rad_angle)
-            for d in range(1, 300):
-                next_position = (position[0] + d*cos_angle, position[1] + d*sin_angle)
-                next_cell = self.pos_to_grid(next_position)
-                if self.occupancy_map[next_cell[0]][next_cell[1]] > threshold:
-                    lidar[i] = d
-                    break
+            try:
+                for d in range(1, 302):
+                    next_position = (position[0] + d*cos_angle, position[1] + d*sin_angle)
+                    next_cell = self.pos_to_grid(next_position)
+                    if self.occupancy_map[next_cell[0]][next_cell[1]] > threshold:
+                        lidar[i] = d
+                        break
+            except:
+                lidar[i] = 301
                 
         # print(angle, '\n', lidar, '\n', self.lidar().get_sensor_values())
         # print([int(i-j) for i, j in zip(lidar, self.lidar().get_sensor_values())])
@@ -293,6 +298,7 @@ class DroneSolutionV1(DroneAbstract):
         
         if self.start:
             self.start = False
+            self.init_dxy()
             return command
 
         lidar = np.array(self.lidar().get_sensor_values())
