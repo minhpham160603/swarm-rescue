@@ -18,6 +18,7 @@ from typing import Optional
 import os
 import sys
 from typing import Type
+import scipy
 
 # This line add, to sys.path, the path to parent path of this file
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -241,7 +242,6 @@ class DroneSolutionV2(DroneAbstract):
             if self.step_count % 100 == 0:
                 plt.imshow(self.occupancy_map.T, cmap='hot', interpolation='nearest')
                 plt.gca().invert_yaxis()
-                # plt.ylim(ymin=0)
                 plt.draw()
                 plt.pause(0.001)
 
@@ -304,19 +304,17 @@ class DroneSolutionV2(DroneAbstract):
         pass
 
 
-    def shortest_path(self, start_point, end_point, threshold = 0):
-        m = ds.Map(len(self.occupancy_map), len(self.occupancy_map[0]))
-        m.set_obstacle([(i, j) for i in range(len(self.occupancy_map))\
-                       for j in range(len(self.occupancy_map[0])) if self.occupancy_map[i][j] > threshold])
+    def shortest_path(self, occupancy_map, start_point, end_point, threshold = 0):
+        m = ds.Map(len(occupancy_map), len(occupancy_map[0]))
+        m.set_obstacle([(i, j) for i in range(len(occupancy_map))\
+                       for j in range(len(occupancy_map[0])) if occupancy_map[i][j] > threshold])
         start = m.map[start_point[0]][start_point[1]]
         end = m.map[end_point[0]][end_point[1]]
         dstar = ds.Dstar(m)
-        # print("dstar ok before")
+        print("dstar ok before")
         rx, ry = dstar.run(start, end)
-        # print("dstar ok after")
+        print("dstar ok after")
         # print(rx, ry)
-        # plt.plot(rx, ry, "-r")
-        # plt.draw()
         return rx, ry
 
     def get_center_location(self):
@@ -333,12 +331,22 @@ class DroneSolutionV2(DroneAbstract):
                 cur_angle = self.measured_fake_angle()
                 self.center_location = cur_position[0] + math.cos(center_angle - cur_angle) * center_distance,\
                         cur_position[1] + math.sin(center_angle - cur_angle) * center_distance
-                print(self.center_location)
+                # print(self.center_location)
                 return self.center_location
         return None
 
     def go_back_to_center(self):
-        pass
+        cur_position = self.measured_fake_position()
+        cur_angle = self.measured_fake_angle()
+        thick_occupancy_map = scipy.ndimage.uniform_filter(self.occupancy_map, size=10, mode='constant')
+        threshold = 10
+        thick_occupancy_map[thick_occupancy_map < threshold] = 0
+        rx, ry = self.shortest_path(thick_occupancy_map, self.pos_to_grid(cur_position)
+                                    , self.pos_to_grid(self.center_location), 5)
+        plt.plot(rx, ry, "-r")
+        plt.draw()
+        print(rx, ry)
+
 
     def control(self):
         command = {"forward": 1.0,
@@ -358,12 +366,6 @@ class DroneSolutionV2(DroneAbstract):
         if self.step_count % 10 == 0:
             self.get_lidar_from_occupancy(self.measured_fake_position(), self.measured_fake_angle())
         
-        if self.step_count % 100 == 0:
-            start_point = self.pos_to_grid(self.measured_fake_position())
-            end_point = self.pos_to_grid((-300, -225))
-            # print(start_point, end_point)
-            self.shortest_path(start_point, end_point)
-        
         if self.start:
             self.start = False
             self.init_dxy()
@@ -377,50 +379,75 @@ class DroneSolutionV2(DroneAbstract):
         # first, we find a command to work toward the goal
         if self.state or (self.lock and self.flag): command["grasper"] = 1
 
+        if self.step_count % 100 == 0 and command["grasper"] == 1:
+            start_point = self.pos_to_grid(self.measured_fake_position())
+            end_point = self.pos_to_grid(self.center_location)
+            print("GO BACK AJHVDJHSVBDHS", start_point, end_point)
+            self.go_back_to_center()
+
         if self.pending == 1:
+            # print("flag 1")
             command["forward"] = 0.0
             diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle())
             command["rotation"] = 1
             if abs(diff_angle) < 0.2:
+                # print("flag 1.1")
                 self.flag = 0
                 self.pending = 0
 
         elif self.goal[1] == 0:
+            # print("flag 2")
             if self.flag == 0:
+                # print("flag 2.1")
                 command["forward"] = 0.0
                 diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle())
                 command["rotation"] = -1.0 if diff_angle < 0 else 1.0
                 if abs(diff_angle) < 0.2:
+                    # print("flag 2.1.1")
                     self.flag = 1
             else:
-                if self.lock == 1: self.counter += 1
+                # print("flag 2.2")
+                if self.lock == 1:
+                    # print("flag 2.2.1")
+                    self.counter += 1
                 if self.counter >= 10:
+                    # print("flag 2.2.2")
                     self.counter = 0
                     self.lock = 0
 
         elif self.goal[1] == 1:
+            # print("flag 3")
             if self.flag == 0:
+                # print("flag 3.1")
                 command["forward"] = 0.0
                 diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle() + math.pi/4)
                 command["rotation"] = -1.0 if diff_angle < 0 else 1.0
                 if abs(diff_angle) < 0.2:
+                    # print("flag 3.1.1")
                     self.flag = 2
             else:
+                # print("flag 3.2")
                 self.counter += 1
                 if self.counter >= 12:
+                    # print("flag 3.2.1")
                     self.flag = 0
                     self.goal[1] = 0
 
         elif self.goal[1] == -1:
+            # print("flag 4")
             if self.flag == 0:
+                # print("flag 4.1")
                 command["forward"] = 0.0
                 diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle() - math.pi/4)
                 command["rotation"] = -1.0 if diff_angle < 0 else 1.0
                 if abs(diff_angle) < 0.2:
+                    # print("flag 4.1.1")
                     self.flag = 2
             else:
+                # print("flag 4.2")
                 self.counter += 1
                 if self.counter >= 12:
+                    # print("flag 4.2.1")
                     self.flag = 0
                     self.counter = 0
                     self.goal[1] = 0
@@ -462,6 +489,7 @@ class DroneSolutionV2(DroneAbstract):
         self.prev_angle = self.measured_fake_angle()
 
         # return
+        # plt.pause(0.1)
         return command
     
     def control_old(self):
