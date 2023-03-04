@@ -61,11 +61,13 @@ class DroneSolutionV2(DroneAbstract):
         self.data = []
 
         self.step_count = 0
-        self.scale = 10
-        self.occupancy_map_size = 100
+        self.scale = 5
+        self.occupancy_map_size = 300
         self.occupancy_map = np.zeros((self.occupancy_map_size, self.occupancy_map_size))
         self.occupancy_map_dx = 0
         self.occupancy_map_dy = 0
+
+        self.center_location = None
 
         self.prev_angle = 0
         self.prev_position = [0, 0]
@@ -233,7 +235,7 @@ class DroneSolutionV2(DroneAbstract):
                     self.occupancy_map_dy += del_y
                     cur_x, cur_y = self.pos_to_grid((x[i], y[i]))
                     print(cur_x, cur_y, self.occupancy_map.shape)
-                self.occupancy_map[cur_x][cur_y] = self.occupancy_map[cur_x][cur_y]+1
+                self.occupancy_map[cur_x][cur_y] = self.occupancy_map[cur_x][cur_y] + 1
 
             # Heatmap for occupancy maps
             if self.step_count % 100 == 0:
@@ -309,12 +311,34 @@ class DroneSolutionV2(DroneAbstract):
         start = m.map[start_point[0]][start_point[1]]
         end = m.map[end_point[0]][end_point[1]]
         dstar = ds.Dstar(m)
-        print("dstar ok before")
+        # print("dstar ok before")
         rx, ry = dstar.run(start, end)
-        print("dstar ok after")
-        print(rx, ry)
-        plt.plot(rx, ry, "-r")
-        plt.draw()
+        # print("dstar ok after")
+        # print(rx, ry)
+        # plt.plot(rx, ry, "-r")
+        # plt.draw()
+        return rx, ry
+
+    def get_center_location(self):
+        if self.center_location is not None:
+            return self.center_location
+        
+        semantic = self.semantic().get_sensor_values()
+        if semantic is None: return None
+        for data in semantic:
+            if data.entity_type == DroneSemanticSensor.TypeEntity.RESCUE_CENTER:
+                center_angle = data.angle
+                center_distance = data.distance
+                cur_position = self.measured_fake_position()
+                cur_angle = self.measured_fake_angle()
+                self.center_location = cur_position[0] + math.cos(center_angle - cur_angle) * center_distance,\
+                        cur_position[1] + math.sin(center_angle - cur_angle) * center_distance
+                print(self.center_location)
+                return self.center_location
+        return None
+
+    def go_back_to_center(self):
+        pass
 
     def control(self):
         command = {"forward": 1.0,
@@ -323,6 +347,12 @@ class DroneSolutionV2(DroneAbstract):
                    "grasper": 0}
         
         self.fix_fake_position()
+        self.get_center_location()
+        if self.step_count % 100 == 0 and self.center_location is not None:
+            center_grid = self.pos_to_grid(self.center_location)
+            circle = plt.Circle(center_grid, 10, fc='white',ec="red")
+            plt.gca().add_patch(circle)
+            plt.draw()
 
         self.gps_mapping()
         if self.step_count % 10 == 0:
@@ -330,10 +360,9 @@ class DroneSolutionV2(DroneAbstract):
         
         if self.step_count % 100 == 0:
             start_point = self.pos_to_grid(self.measured_fake_position())
-            end_point = self.pos_to_grid((0, 0))
-            print(start_point, end_point)
+            end_point = self.pos_to_grid((-300, -225))
+            # print(start_point, end_point)
             self.shortest_path(start_point, end_point)
-            print("????")
         
         if self.start:
             self.start = False
