@@ -231,7 +231,7 @@ class DroneSolutionV1(DroneAbstract):
         # plt.pause(0.001)
         return lidar
 
-    def correct(self, lidar_from_occupancy, lidar_from_measure):
+    def calc_icp(self, lidar_from_occupancy, lidar_from_measure):
         """
         Correct the new measurement to align it to the previous measurement.
         Need:
@@ -242,7 +242,7 @@ class DroneSolutionV1(DroneAbstract):
         - Rotational matrix
         - Translation matrix
         """
-        X_prev, Y_prev = self.get_absolute_position_lidar(lidar_from_measure, self.prev_position, self.prev_angle, threshold=400)
+        X_prev, Y_prev = self.get_absolute_position_lidar(lidar_from_measure, [0, 0], 0, threshold=400)
         X_cur, Y_cur = self.get_absolute_position_lidar(lidar_from_occupancy, self.measured_fake_position(), self.measured_fake_angle(), threshold=400)
 
         previous_points = np.vstack((X_prev, Y_prev))
@@ -360,7 +360,7 @@ class DroneSolutionV1(DroneAbstract):
         # print(self.prev_position, self.measeured_fake_position())
         lidar_from_occupancy = self.get_lidar_from_occupancy(self.measured_fake_position(), self.measured_fake_angle())
         lidar_from_measure = self.lidar().get_sensor_values()
-        print(self.correct(lidar_from_occupancy, lidar_from_measure))
+        print(self.calc_icp(lidar_from_occupancy, lidar_from_measure))
 
         #update prev_angle
         self.prev_position = self.measured_fake_position()
