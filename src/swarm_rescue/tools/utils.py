@@ -1,6 +1,6 @@
 import numpy as np
 
-NON_DISCOVERED = -10
+NON_DISCOVERED = -1
 def crop(map):
     return map, 0, 0
     # print(np.nonzero(map), map.shape)
@@ -19,5 +19,5 @@ def enlarge(map):
     col_add = col//4
     large_map = np.full((2*row_add+row, 2*col_add+col), NON_DISCOVERED)
     print('aaaa', map.shape, row_add, col_add)
-    large_map[row_add:-row_add, col_add:-col_add] = map
+    # large_map[row_add:-row_add, col_add:-col_add] = map
     return large_map, a+row_add, b+col_add

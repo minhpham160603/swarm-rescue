@@ -38,7 +38,7 @@ from spg_overlay.utils.misc_data import MiscData
 from spg_overlay.utils.utils import normalize_angle
 
 # self.base.grasper.grasped_entities
-NON_DISCOVERED = -10
+NON_DISCOVERED = -1
 DRONE_RADIUS = 5
 
 class DroneSolutionV2(DroneAbstract):
@@ -67,7 +67,7 @@ class DroneSolutionV2(DroneAbstract):
 
         self.step_count = 0
         self.scale = 5
-        self.occupancy_map_size = 300
+        self.occupancy_map_size = 600
         self.occupancy_map = np.full((self.occupancy_map_size, self.occupancy_map_size), NON_DISCOVERED)
         self.occupancy_map_dx = 0
         self.occupancy_map_dy = 0
@@ -238,8 +238,10 @@ class DroneSolutionV2(DroneAbstract):
             x, y = self.get_absolute_position_lidar(self.lidar().get_sensor_values(), self.measured_fake_position(), self.measured_fake_angle())
             for i in range(len(x)):
                 cur_x, cur_y = self.pos_to_grid((x[i], y[i]))
-                while not (0 <= cur_x < len(self.occupancy_map) and 0 <= cur_y < len(self.occupancy_map[0])):
+                while not (0 <= cur_x - SCALED_DRONE_RADIUS and cur_x + SCALED_DRONE_RADIUS < len(self.occupancy_map)
+                           and 0 <= cur_y - SCALED_DRONE_RADIUS and cur_y + SCALED_DRONE_RADIUS < len(self.occupancy_map[0])):
                     self.occupancy_map, del_x, del_y = enlarge(self.occupancy_map)
+                    plt.clf()
                     self.occupancy_map_dx += del_x                    
                     self.occupancy_map_dy += del_y
                     cur_x, cur_y = self.pos_to_grid((x[i], y[i]))
@@ -249,7 +251,7 @@ class DroneSolutionV2(DroneAbstract):
                         if not (0 <= wall_x <= len(self.occupancy_map) and 0 <= wall_y <= len(self.occupancy_map[0])):
                             continue
                         if self.occupancy_map[wall_x][wall_y] >= 0:
-                            self.occupancy_map[wall_x][wall_y] = self.occupancy_map[wall_x][wall_y] + 1
+                            self.occupancy_map[wall_x][wall_y] = (self.occupancy_map[wall_x][wall_y] + 1)/2
                         else:
                             self.occupancy_map[wall_x][wall_y] = 1
 
@@ -270,7 +272,7 @@ class DroneSolutionV2(DroneAbstract):
                             self.occupancy_map[next_cell[0]][next_cell[1]] = 0
 
             # Heatmap for occupancy maps
-            if self.step_count % 100 == 0:
+            if self.step_count % 20 == 0:
                 plt.imshow(self.occupancy_map.T, cmap='hot', interpolation='nearest')
                 plt.gca().invert_yaxis()
                 plt.draw()
@@ -382,6 +384,8 @@ class DroneSolutionV2(DroneAbstract):
         print(f'Non discovered points: {non_discovered_points}')
         if len(non_discovered_points) <= 1:
             return
+        non_discovered_points[np.apply_along_axis(lambda row: np.arctan2(row[1] - cur_grid[1], row[0] - cur_grid[0]), axis=1, arr=non_discovered_points).argsort()]
+
         print(f'Average of non discovered points: {np.average(non_discovered_points, axis = 0)}')
         average_point = tuple(np.average(non_discovered_points, axis = 0).astype(int))
         if cur_grid == average_point: # without this doesnt work for some reasons
@@ -394,16 +398,16 @@ class DroneSolutionV2(DroneAbstract):
         print(f'Start point type: {self.occupancy_map[cur_grid[0], cur_grid[1]]}')
         print(f'Dist point type: {self.occupancy_map[average_point[0], average_point[1]]}')
         if self.occupancy_map[cur_grid[0], cur_grid[1]] >= 1:
-            for dx in range(-3, 3):
-                for dy in range(-3, 3):
+            for dx in range(-5, 5):
+                for dy in range(-5, 5):
                     if self.occupancy_map[cur_grid[0] + dx, cur_grid[1] + dy] != -1:
                         cur_grid = cur_grid[0] + dx, cur_grid[1] + dy
                         break
                 else:
                     break
         if self.occupancy_map[average_point[0], average_point[1]] >= 1:
-            for dx in range(-3, 3):
-                for dy in range(-3, 3):
+            for dx in range(-5, 5):
+                for dy in range(-5, 5):
                     if self.occupancy_map[average_point[0] + dx, average_point[1] + dy] < 1:
                         average_point = average_point[0] + dx, average_point[1] + dy
                         break
