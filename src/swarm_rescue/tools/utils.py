@@ -5,11 +5,11 @@ def crop(map):
     return map, 0, 0
     # print(np.nonzero(map), map.shape)
     row, col = np.nonzero(np.atleast_1d(map))
-    print('asdf', row, col, type(row), col.shape)
+    # print('asdf', row, col, type(row), col.shape)
     if row.any() == False:
         row = [0, map.shape[0]-1]
         col = [0, map.shape[1]-1]
-    print('asdf', row, col, type(row))
+    # print('asdf', row, col, type(row))
     return map[min(row):max(row)+1][min(col):max(col)+1], min(row), min(col)
 
 def enlarge(map):
