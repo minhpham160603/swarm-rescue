@@ -36,10 +36,12 @@ class MyDroneLidar(DroneAbstract):
         """
         We only send a command to do nothing
         """
-        command = {"forward": 0.0,
+        prev = self.measured_gps_position()
+        command = {"forward": 1.0,
                    "lateral": 0.0,
                    "rotation": 0.0,
                    "grasper": 0}
+        print("blaa: ", self.measured_gps_position()[0] - prev[0], self.measured_gps_position()[1] - prev[1])
         return command
 
 

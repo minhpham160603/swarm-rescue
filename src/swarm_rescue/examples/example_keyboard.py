@@ -24,6 +24,7 @@ from spg_overlay.utils.misc_data import MiscData
 class MyDroneKeyboard(DroneAbstract):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
+        self.prev = [0, 0]
 
     def define_message_for_all(self):
         """
@@ -32,10 +33,11 @@ class MyDroneKeyboard(DroneAbstract):
         pass
 
     def control(self):
-        command = {"forward": 0.0,
+        command = {"forward": 1.0,
                    "lateral": 0.0,
                    "rotation": 0.0,
                    "grasper": 0}
+        
         return command
 
 
@@ -113,7 +115,7 @@ def main():
                 draw_lidar=True,
                 draw_semantic=True,
                 draw_touch=True,
-                use_keyboard=True,
+                use_keyboard=False,
                 )
     gui.run()
 
