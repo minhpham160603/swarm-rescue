@@ -18,12 +18,14 @@ from typing import Optional
 import os
 import sys
 from typing import Type
+import scipy
 
 # This line add, to sys.path, the path to parent path of this file
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from tools.icp import plot_points, icp_matching, plot_points_3plots
+from tools.icp import icp_matching
 from tools.utils import enlarge
+import tools.dstar as ds
 from spg_overlay.entities.drone_abstract import DroneAbstract
 from spg_overlay.entities.drone_distance_sensors import DroneSemanticSensor
 from spg_overlay.entities.rescue_center import RescueCenter, wounded_rescue_center_collision
@@ -35,7 +37,7 @@ from spg_overlay.utils.misc_data import MiscData
 from spg_overlay.utils.utils import normalize_angle
 
 # self.base.grasper.grasped_entities
-class DroneSolutionV1(DroneAbstract):
+class DroneSolutionV2(DroneAbstract):
     def __init__(self,
                  identifier: Optional[int] = None,
                  misc_data: Optional[MiscData] = None, debug = False,
@@ -60,19 +62,18 @@ class DroneSolutionV1(DroneAbstract):
         self.data = []
 
         self.step_count = 0
-        self.scale = 3
-        self.occupancy_map_size = 100
+        self.scale = 5
+        self.occupancy_map_size = 300
         self.occupancy_map = np.zeros((self.occupancy_map_size, self.occupancy_map_size))
         self.occupancy_map_dx = 0
         self.occupancy_map_dy = 0
+
+        self.center_location = None
 
         self.prev_angle = 0
         self.prev_position = [0, 0]
         # state: finding people or taking people back
         # flag: to help with going
-
-        self.list_gps = [[], []]
-        self.list_odo = [[], []]
 
     def init_dxy(self):
         # set dx and dy
@@ -96,128 +97,33 @@ class DroneSolutionV1(DroneAbstract):
         return touched
     
     def measured_fake_angle(self):
-        return self.angle1
         return self.measured_compass_angle() or self.angle1
 
     def measured_fake_position(self):
-        return self.position1
         return self.measured_gps_position() or self.position1
 
-    def rotation_matrix(self, angle):
-        return np.array([[math.cos(angle), -math.sin(angle)], [math.sin(angle), math.cos(angle)]])
-
-    def mean_square_error(self, lidar1, lidar2):
-        return np.sum((lidar1 - lidar2)**2)/len(lidar1)
-
-    def calc_icp(self, lidar_from_occupancy, lidar_from_measure):
-        """
-        Correct the new measurement to align it to the previous measurement.
-        Need:
-        - Absolute value of lidar_from_occupancy
-        - Absolute value of lidar_from_measure
-        -> ICP translate from lidar_from_occupancy to the lidar_from_measure 
-        Return:
-        - Rotational matrix 
-        - Translation matrix
-        """
-        X_prev, Y_prev = self.get_absolute_position_lidar(lidar_from_measure, [0, 0], 0, threshold=400)
-        X_cur, Y_cur = self.get_absolute_position_lidar(lidar_from_occupancy, [0, 0], 0, threshold=400)
-        previous_points = np.vstack((X_prev, Y_prev))
-        current_points = np.vstack((X_cur, Y_cur))
-        R, t = icp_matching(previous_points, current_points)
-
-        return R, t
-
-        # np_position = np.array(self.position1)
-        # np_position = self.rotation_matrix(alpha)@np_position
-
-
-        # print("movement:", previous_points[0][0] - (self.rotation_matrix(alpha)@current_points)[0][0], previous_points[1][0] - (self.rotation_matrix(alpha)@current_points)[1][0], T)
-        # print(alpha)
-
-    # def find_best_translation(self, lidar1, lidar2):
-
-
-    def fix_fake_position(self, tolerance=2):
-        if self.start: # self.measured_compass_angle() != None:
+    def fix_fake_position(self):
+        if False: # self.measured_compass_angle() != None:
             self.angle1 = self.measured_compass_angle()
             a, b = self.measured_gps_position()
             self.position1 = [a, b]     
         else:
             # update angle1 and position1
             odo = self.odometer_values()
-            dx, dy, d_angle = self.process_odometer(odo)
+            self.angle1 += odo[-1]
+            self.position1[0] += odo[0]
+            self.position1[1] += odo[1]
 
-            # print(odo)
-            # if self.step_count%20==3: input()
-            # print("odo", odo)
-
-            self.angle1 += d_angle
-            self.position1[0] += dx
-            self.position1[1] += dy
-
-            # # tmp_angle = self.angle1 + d_angle
-            # # tmp_position = self.position1[0] + dx, self.position1[1] + dy
-
-            # # localization
-            # lidar_from_occupancy = self.get_lidar_from_occupancy(self.position1, self.angle1)
-            # lidar_from_measure = self.lidar().get_sensor_values()
-
-            # X_prev, Y_prev = self.get_absolute_position_lidar(lidar_from_measure, [0, 0], 0, threshold=400)
-            # X_cur, Y_cur = self.get_absolute_position_lidar(lidar_from_occupancy, [0, 0], 0, threshold=400)
-
-            # previous_points = np.vstack((X_prev, Y_prev))
-            # current_points = np.vstack((X_cur, Y_cur))
-            # R, t = self.calc_icp(lidar_from_occupancy, lidar_from_measure)
-
-            # if self.step_count > 45:
-            #     print(R)
-            #     print(t)
-            #     print(self.angle1)
-            #     print(self.position1)
-            #     print(self.measured_compass_angle())
-            #     print(self.measured_gps_position())
-            #     assert False
-            #     self.angle1 += np.arctan(R[1][0]/R[0][0])
-            #     self.position1[0] += t[0]
-            #     self.position1[1] += t[1]
-
-
-            # if self.step_count > 100 and self.step_count % 50 == 2:
-            #     figure = plt.figure()
-            #     tmp_points = R@current_points
-            #     tmp_points[0] += t[0]
-            #     tmp_points[1] += t[1]
-            #     plot_points_3plots(previous_points, tmp_points, current_points, figure)
-            #     plt.pause(0.1)
-            #     print("cur_point", current_points[0][:20], current_points[1][:20])
-            #     print("Value of t", t, self.measured_gps_position()[0] - self.position1[0], self.measured_gps_position()[1] - self.measured_gps_position()[1])
-            #     input()
-
-
-
-            # print("T", self.measured_gps_position()[0] - self.position1[0], self.measured_gps_position()[1] - self.position1[1], T)
+            # localization
+            lidar_from_occupancy = self.get_lidar_from_occupancy(self.position1, self.angle1)
+            lidar_from_measure = self.lidar().get_sensor_values()
+            R, t = self.correct(lidar_from_occupancy, lidar_from_measure)
+            self.position1[0] += t[0]
+            self.position1[1] += t[1]
+            self.angle1 += np.arctan(R[0][0]/R[1][0])
             
-            # print(self.angle1, self.measured_compass_angle())
-            # print(self.position1, self.measured_gps_position())
 
-            # ////// Code to update gps_list and odo_list
-            #
-            # x1, y1 = self.measured_gps_position()
-            # x2, y2 = self.position1
-            # self.list_gps[0].append(x1)
-            # self.list_gps[1].append(y1)
-            # self.list_odo[0].append(x2)
-            # self.list_odo[1].append(y2)
-            # if self.step_count%10 == 1:
-            #     plt.scatter(self.list_gps[0], self.list_gps[1], label='gps')
-            #     plt.scatter(self.list_odo[0], self.list_odo[1], label='guessed')
-            #     plt.legend()
-            #     plt.show()
-            
-    def todegree(self, angle):
-        return angle*180/math.pi
-    
+
     def torad(self, i):
         return (i-90)/90*math.pi
 
@@ -316,43 +222,30 @@ class DroneSolutionV1(DroneAbstract):
         y = edge_distances * np.sin(edge_angles) + cur_y    
         return (x, y)
 
+
     def gps_mapping(self):
         # print(self.step_count)
         self.step_count += 1
         if self.lidar().get_sensor_values() is not None:
-            data = set()
             x, y = self.get_absolute_position_lidar(self.lidar().get_sensor_values(), self.measured_fake_position(), self.measured_fake_angle())
             for i in range(len(x)):
                 cur_x, cur_y = self.pos_to_grid((x[i], y[i]))
-                while not (0 < cur_x < len(self.occupancy_map)-1 and 0 < cur_y < len(self.occupancy_map[0])-1):
+                while not (0 <= cur_x < len(self.occupancy_map) and 0 <= cur_y < len(self.occupancy_map[0])):
                     self.occupancy_map, del_x, del_y = enlarge(self.occupancy_map)
                     self.occupancy_map_dx += del_x                    
                     self.occupancy_map_dy += del_y
                     cur_x, cur_y = self.pos_to_grid((x[i], y[i]))
                     print(cur_x, cur_y, self.occupancy_map.shape)
-                self.occupancy_map[cur_x][cur_y] += 1
-                # for dx, dy in [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]]:
-                #     self.occupancy_map[cur_x+dx][cur_y+dy] /= 2
+                self.occupancy_map[cur_x][cur_y] = self.occupancy_map[cur_x][cur_y] + 1
 
-            # # Heatmap for occupancy maps
-            # if self.step_count % 10 == 0:
-            #     plt.imshow(self.occupancy_map.T, cmap='hot', interpolation='nearest')
-            #     plt.gca().invert_yaxis()
-            #     # plt.ylim(ymin=0)
-            #     plt.draw()
-            #     plt.pause(0.001)
+            # Heatmap for occupancy maps
+            if self.step_count % 100 == 0:
+                plt.imshow(self.occupancy_map.T, cmap='hot', interpolation='nearest')
+                plt.gca().invert_yaxis()
+                plt.draw()
+                plt.pause(0.001)
 
-    def process_odometer(self, odo):
-        """
-        Return dx, dy, d_angle
-        """
-        dist, alpha, theta = odo
-        tmp_angle = self.measured_fake_angle() + alpha
-        dx = dist*math.cos(tmp_angle)
-        dy = dist*math.sin(tmp_angle)
-        return dx, dy, theta
-
-    def get_lidar_from_occupancy(self, position, angle, threshold = 0.5):
+    def get_lidar_from_occupancy(self, position, angle, threshold = 0):
         lidar = np.array([300 for _ in range(181)])
         # cur_cell = self.pos_to_grid(position)
 
@@ -384,18 +277,227 @@ class DroneSolutionV1(DroneAbstract):
         # plt.pause(0.001)
         return lidar
 
+    def correct(self, lidar_from_occupancy, lidar_from_measure):
+        """
+        Correct the new measurement to align it to the previous measurement.
+        Need:
+        - Absolute value of lidar_from_occupancy
+        - Absolute value of lidar_from_measure
+        -> ICP translate from lidar_from_occupancy to the lidar_from_measure 
+        Return:
+        - Rotational matrix 
+        - Translation matrix
+        """
+        X_prev, Y_prev = self.get_absolute_position_lidar(lidar_from_measure, (0, 0), 0, threshold=400)
+        X_cur, Y_cur = self.get_absolute_position_lidar(lidar_from_occupancy, (0, 0), 0, threshold=400)
+
+        previous_points = np.vstack((X_prev, Y_prev))
+        current_points = np.vstack((X_cur, Y_cur))
+
+        R, t = icp_matching(previous_points, current_points)
+        return R, t
+
     def define_message_for_all(self):
         """
         Here, we don't need communication...
         """
         pass
 
+
+    def shortest_path(self, occupancy_map, start_point, end_point, threshold = 0):
+        m = ds.Map(len(occupancy_map), len(occupancy_map[0]))
+        m.set_obstacle([(i, j) for i in range(len(occupancy_map))\
+                       for j in range(len(occupancy_map[0])) if occupancy_map[i][j] > threshold])
+        start = m.map[start_point[0]][start_point[1]]
+        end = m.map[end_point[0]][end_point[1]]
+        dstar = ds.Dstar(m)
+        print("dstar ok before")
+        rx, ry = dstar.run(start, end)
+        print("dstar ok after")
+        # print(rx, ry)
+        return rx, ry
+
+    def get_center_location(self):
+        if self.center_location is not None:
+            return self.center_location
+        
+        semantic = self.semantic().get_sensor_values()
+        if semantic is None: return None
+        for data in semantic:
+            if data.entity_type == DroneSemanticSensor.TypeEntity.RESCUE_CENTER:
+                center_angle = data.angle
+                center_distance = data.distance
+                cur_position = self.measured_fake_position()
+                cur_angle = self.measured_fake_angle()
+                self.center_location = cur_position[0] + math.cos(center_angle - cur_angle) * center_distance,\
+                        cur_position[1] + math.sin(center_angle - cur_angle) * center_distance
+                # print(self.center_location)
+                return self.center_location
+        return None
+
+    def go_back_to_center(self):
+        cur_position = self.measured_fake_position()
+        cur_angle = self.measured_fake_angle()
+        thick_occupancy_map = scipy.ndimage.uniform_filter(self.occupancy_map, size=10, mode='constant')
+        threshold = 10
+        thick_occupancy_map[thick_occupancy_map < threshold] = 0
+        rx, ry = self.shortest_path(thick_occupancy_map, self.pos_to_grid(cur_position)
+                                    , self.pos_to_grid(self.center_location), 5)
+        plt.plot(rx, ry, "-r")
+        plt.draw()
+        print(rx, ry)
+
+
     def control(self):
         command = {"forward": 1.0,
                    "lateral": 0.0,
                    "rotation": 0.0,
                    "grasper": 0}
+        
+        self.fix_fake_position()
+        self.get_center_location()
+        if self.step_count % 100 == 0 and self.center_location is not None:
+            center_grid = self.pos_to_grid(self.center_location)
+            circle = plt.Circle(center_grid, 10, fc='white',ec="red")
+            plt.gca().add_patch(circle)
+            plt.draw()
 
+        self.gps_mapping()
+        if self.step_count % 10 == 0:
+            self.get_lidar_from_occupancy(self.measured_fake_position(), self.measured_fake_angle())
+        
+        if self.start:
+            self.start = False
+            self.init_dxy()
+            return command
+
+        lidar = np.array(self.lidar().get_sensor_values())
+        lidar = lidar[:-1]
+
+        semantic = self.semantic().get_sensor_values()
+
+        # first, we find a command to work toward the goal
+        if self.state or (self.lock and self.flag): command["grasper"] = 1
+
+        if self.step_count % 100 == 0 and command["grasper"] == 1:
+            start_point = self.pos_to_grid(self.measured_fake_position())
+            end_point = self.pos_to_grid(self.center_location)
+            print("GO BACK AJHVDJHSVBDHS", start_point, end_point)
+            self.go_back_to_center()
+
+        if self.pending == 1:
+            # print("flag 1")
+            command["forward"] = 0.0
+            diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle())
+            command["rotation"] = 1
+            if abs(diff_angle) < 0.2:
+                # print("flag 1.1")
+                self.flag = 0
+                self.pending = 0
+
+        elif self.goal[1] == 0:
+            # print("flag 2")
+            if self.flag == 0:
+                # print("flag 2.1")
+                command["forward"] = 0.0
+                diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle())
+                command["rotation"] = -1.0 if diff_angle < 0 else 1.0
+                if abs(diff_angle) < 0.2:
+                    # print("flag 2.1.1")
+                    self.flag = 1
+            else:
+                # print("flag 2.2")
+                if self.lock == 1:
+                    # print("flag 2.2.1")
+                    self.counter += 1
+                if self.counter >= 10:
+                    # print("flag 2.2.2")
+                    self.counter = 0
+                    self.lock = 0
+
+        elif self.goal[1] == 1:
+            # print("flag 3")
+            if self.flag == 0:
+                # print("flag 3.1")
+                command["forward"] = 0.0
+                diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle() + math.pi/4)
+                command["rotation"] = -1.0 if diff_angle < 0 else 1.0
+                if abs(diff_angle) < 0.2:
+                    # print("flag 3.1.1")
+                    self.flag = 2
+            else:
+                # print("flag 3.2")
+                self.counter += 1
+                if self.counter >= 12:
+                    # print("flag 3.2.1")
+                    self.flag = 0
+                    self.goal[1] = 0
+
+        elif self.goal[1] == -1:
+            # print("flag 4")
+            if self.flag == 0:
+                # print("flag 4.1")
+                command["forward"] = 0.0
+                diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle() - math.pi/4)
+                command["rotation"] = -1.0 if diff_angle < 0 else 1.0
+                if abs(diff_angle) < 0.2:
+                    # print("flag 4.1.1")
+                    self.flag = 2
+            else:
+                # print("flag 4.2")
+                self.counter += 1
+                if self.counter >= 12:
+                    # print("flag 4.2.1")
+                    self.flag = 0
+                    self.counter = 0
+                    self.goal[1] = 0
+
+        # then, we update our state
+        if self.state == 0 and self.base.grasper.grasped_entities:
+            self.lock = 0
+            self.state = 1
+
+        elif self.state == 1 and not self.base.grasper.grasped_entities:
+            self.lock = 0
+            self.state = 0
+        
+        # then, call new
+        a, b = self.new(lidar, semantic)
+        if a:
+            self.goal = [normalize_angle(b[0]+self.measured_fake_angle()), b[1]]
+            self.flag = 0
+            self.counter = 0
+            if self.debug:
+                print('new goal!', b)
+                input()
+            self.limit = 0
+
+        self.limit += 1
+        if self.limit >= 180:
+            print('limit reached!')
+            a, b = self.new(lidar, semantic)
+            self.goal = [normalize_angle(b[0]+self.measured_fake_angle()), b[1]]
+            self.limit = 0
+            self.state = 0
+            self.flag = 0
+            self.counter = 0
+        
+        # print(self.prev_position, self.measeured_fake_position())
+
+        #update prev_angle
+        self.prev_position = self.measured_fake_position()
+        self.prev_angle = self.measured_fake_angle()
+
+        # return
+        # plt.pause(0.1)
+        return command
+    
+    def control_old(self):
+        command = {"forward": 1.0,
+                   "lateral": 0.0,
+                   "rotation": 0.0,
+                   "grasper": 0}
+        
         self.fix_fake_position()
 
         self.gps_mapping()
@@ -494,10 +596,10 @@ class DroneSolutionV1(DroneAbstract):
             self.counter = 0
         
         # print(self.prev_position, self.measeured_fake_position())
-        # lidar_from_occupancy = self.get_lidar_from_occupancy(self.measured_fake_position(), self.measured_fake_angle())
-        # lidar_from_measure = self.lidar().get_sensor_values()
-        # print(self.calc_icp(lidar_from_occupancy, lidar_from_measure))
 
         #update prev_angle
+        self.prev_position = self.measured_fake_position()
+        self.prev_angle = self.measured_fake_angle()
+
         # return
         return command

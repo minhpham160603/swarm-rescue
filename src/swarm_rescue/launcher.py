@@ -11,6 +11,7 @@ from maps.map_intermediate_02 import MyMapIntermediate02
 from maps.map_complete_01 import MyMapComplete01
 from maps.map_complete_02 import MyMapComplete02
 from solutions.solution_v1 import DroneSolutionV1
+from solutions.solution_v2 import DroneSolutionV2
 
 from solutions.my_drone_random import MyDroneRandom
 from solutions.solution_v1 import DroneSolutionV1
@@ -19,7 +20,7 @@ from solutions.solution_v1 import DroneSolutionV1
 class MyMap(MyMapIntermediate01):
     pass
 
-class MyDrone(DroneSolutionV1):
+class MyDrone(DroneSolutionV2):
     pass
 
 class Launcher:

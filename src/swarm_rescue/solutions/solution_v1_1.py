@@ -156,31 +156,31 @@ class DroneSolutionV1(DroneAbstract):
             self.position1[0] += dx
             self.position1[1] += dy
 
-            # # tmp_angle = self.angle1 + d_angle
-            # # tmp_position = self.position1[0] + dx, self.position1[1] + dy
+            # tmp_angle = self.angle1 + d_angle
+            # tmp_position = self.position1[0] + dx, self.position1[1] + dy
 
-            # # localization
-            # lidar_from_occupancy = self.get_lidar_from_occupancy(self.position1, self.angle1)
-            # lidar_from_measure = self.lidar().get_sensor_values()
+            # localization
+            lidar_from_occupancy = self.get_lidar_from_occupancy(self.position1, self.angle1)
+            lidar_from_measure = self.lidar().get_sensor_values()
 
-            # X_prev, Y_prev = self.get_absolute_position_lidar(lidar_from_measure, [0, 0], 0, threshold=400)
-            # X_cur, Y_cur = self.get_absolute_position_lidar(lidar_from_occupancy, [0, 0], 0, threshold=400)
+            X_prev, Y_prev = self.get_absolute_position_lidar(lidar_from_measure, [0, 0], 0, threshold=400)
+            X_cur, Y_cur = self.get_absolute_position_lidar(lidar_from_occupancy, [0, 0], 0, threshold=400)
 
-            # previous_points = np.vstack((X_prev, Y_prev))
-            # current_points = np.vstack((X_cur, Y_cur))
-            # R, t = self.calc_icp(lidar_from_occupancy, lidar_from_measure)
+            previous_points = np.vstack((X_prev, Y_prev))
+            current_points = np.vstack((X_cur, Y_cur))
+            R, t = self.calc_icp(lidar_from_occupancy, lidar_from_measure)
 
-            # if self.step_count > 45:
-            #     print(R)
-            #     print(t)
-            #     print(self.angle1)
-            #     print(self.position1)
-            #     print(self.measured_compass_angle())
-            #     print(self.measured_gps_position())
-            #     assert False
-            #     self.angle1 += np.arctan(R[1][0]/R[0][0])
-            #     self.position1[0] += t[0]
-            #     self.position1[1] += t[1]
+            if self.step_count > 45:
+                print(R)
+                print(t)
+                print(self.angle1)
+                print(self.position1)
+                print(self.measured_compass_angle())
+                print(self.measured_gps_position())
+                assert False
+                self.angle1 += np.arctan(R[1][0]/R[0][0])
+                self.position1[0] += t[0]
+                self.position1[1] += t[1]
 
 
             # if self.step_count > 100 and self.step_count % 50 == 2:

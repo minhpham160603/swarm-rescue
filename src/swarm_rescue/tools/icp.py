@@ -10,10 +10,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 #  ICP parameters
-EPS = 0.0001
+EPS = 0.001
 MAX_ITER = 100
 
-show_animation = True
+show_animation = False
 
 
 def icp_matching(previous_points, current_points):
@@ -36,6 +36,8 @@ def icp_matching(previous_points, current_points):
         fig = plt.figure()
         if previous_points.shape[0] == 3:
            fig.add_subplot(111, projection='3d')
+    
+    init_points = current_points.copy()
 
     while dError >= EPS:
         count += 1
@@ -65,9 +67,11 @@ def icp_matching(previous_points, current_points):
         elif MAX_ITER <= count:
             # print("Not Converge...", error, dError, count)
             break
-
+    
     R = np.array(H[0:-1, 0:-1])
     T = np.array(H[0:-1, -1])
+    # print("Bruhhh:", previous_points - (R@init_points), T)
+    # input()
 
     return R, T
 
@@ -117,6 +121,28 @@ def svd_motion_estimation(previous_points, current_points):
 
     return R, t
 
+def plot_points_3plots(previous_points, current_points, old_points, figure):
+    # for stopping simulation with the esc key.
+    plt.gcf().canvas.mpl_connect(
+        'key_release_event',
+        lambda event: [exit(0) if event.key == 'escape' else None])
+    if previous_points.shape[0] == 3:
+        plt.clf()
+        axes = figure.add_subplot(111, projection='3d')
+        axes.scatter(previous_points[0, :], previous_points[1, :],
+                    previous_points[2, :], c="r", marker=".", label="prev_points")
+        axes.scatter(current_points[0, :], current_points[1, :],
+                    current_points[2, :], c="b", marker=".", label="curr_points")
+        axes.scatter(0.0, 0.0, 0.0, c="r", marker="x")
+        figure.canvas.draw()
+        plt.legend()
+    else:
+        plt.cla()
+        plt.plot(previous_points[0, :], previous_points[1, :], ".r")
+        plt.plot(current_points[0, :], current_points[1, :], ".b")
+        plt.plot(old_points[0, :], current_points[1, :], '.g')
+        plt.plot(0.0, 0.0, "xr")
+        plt.axis("equal")
 
 def plot_points(previous_points, current_points, figure):
     # for stopping simulation with the esc key.
@@ -127,11 +153,12 @@ def plot_points(previous_points, current_points, figure):
         plt.clf()
         axes = figure.add_subplot(111, projection='3d')
         axes.scatter(previous_points[0, :], previous_points[1, :],
-                    previous_points[2, :], c="r", marker=".")
+                    previous_points[2, :], c="r", marker=".", label="prev_points")
         axes.scatter(current_points[0, :], current_points[1, :],
-                    current_points[2, :], c="b", marker=".")
+                    current_points[2, :], c="b", marker=".", label="curr_points")
         axes.scatter(0.0, 0.0, 0.0, c="r", marker="x")
         figure.canvas.draw()
+        plt.legend()
     else:
         plt.cla()
         plt.plot(previous_points[0, :], previous_points[1, :], ".r")
@@ -156,6 +183,7 @@ def main():
         px = (np.random.rand(nPoint) - 0.5) * fieldLength
         py = (np.random.rand(nPoint) - 0.5) * fieldLength
         previous_points = np.vstack((px, py))
+        previous_points_1 = previous_points + 10
 
         # current points
         cx = [math.cos(motion[2]) * x - math.sin(motion[2]) * y + motion[0]
@@ -163,8 +191,10 @@ def main():
         cy = [math.sin(motion[2]) * x + math.cos(motion[2]) * y + motion[1]
               for (x, y) in zip(px, py)]
         current_points = np.vstack((cx, cy))
+        current_points_1 = current_points + 10
 
         R, T = icp_matching(previous_points, current_points)
+        # R_t, T_t = icp_matching(previous_points_1, current_points_1)
         print("R:", R)
         print("T:", T)
 
@@ -186,6 +216,7 @@ def main_3d_points():
         py = (np.random.rand(nPoint) - 0.5) * fieldLength
         pz = (np.random.rand(nPoint) - 0.5) * fieldLength
         previous_points = np.vstack((px, py, pz))
+       
 
         # current points
         cx = [math.cos(motion[3]) * x - math.sin(motion[3]) * z + motion[0]
@@ -194,8 +225,10 @@ def main_3d_points():
         cz = [math.sin(motion[3]) * x + math.cos(motion[3]) * z + motion[2]
               for (x, z) in zip(px, pz)]
         current_points = np.vstack((cx, cy, cz))
+        
 
         R, T = icp_matching(previous_points, current_points)
+       
         print("R:", R)
         print("T:", T)
 
