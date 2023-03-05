@@ -19,6 +19,7 @@ import os
 import sys
 from typing import Type
 import scipy
+from collections import deque
 
 # This line add, to sys.path, the path to parent path of this file
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -37,6 +38,9 @@ from spg_overlay.utils.misc_data import MiscData
 from spg_overlay.utils.utils import normalize_angle
 
 # self.base.grasper.grasped_entities
+NON_DISCOVERED = -10
+DRONE_RADIUS = 5
+
 class DroneSolutionV2(DroneAbstract):
     def __init__(self,
                  identifier: Optional[int] = None,
@@ -64,10 +68,12 @@ class DroneSolutionV2(DroneAbstract):
         self.step_count = 0
         self.scale = 5
         self.occupancy_map_size = 300
-        self.occupancy_map = np.zeros((self.occupancy_map_size, self.occupancy_map_size))
+        self.occupancy_map = np.full((self.occupancy_map_size, self.occupancy_map_size), NON_DISCOVERED)
         self.occupancy_map_dx = 0
         self.occupancy_map_dy = 0
 
+        
+        self.goal_explore_angle = 1e9
         self.center_location = None
 
         self.prev_angle = 0
@@ -226,7 +232,9 @@ class DroneSolutionV2(DroneAbstract):
     def gps_mapping(self):
         # print(self.step_count)
         self.step_count += 1
+        SCALED_DRONE_RADIUS = DRONE_RADIUS // self.scale
         if self.lidar().get_sensor_values() is not None:
+            # Update expected wall
             x, y = self.get_absolute_position_lidar(self.lidar().get_sensor_values(), self.measured_fake_position(), self.measured_fake_angle())
             for i in range(len(x)):
                 cur_x, cur_y = self.pos_to_grid((x[i], y[i]))
@@ -235,8 +243,31 @@ class DroneSolutionV2(DroneAbstract):
                     self.occupancy_map_dx += del_x                    
                     self.occupancy_map_dy += del_y
                     cur_x, cur_y = self.pos_to_grid((x[i], y[i]))
-                    print(cur_x, cur_y, self.occupancy_map.shape)
-                self.occupancy_map[cur_x][cur_y] = self.occupancy_map[cur_x][cur_y] + 1
+                    # print(cur_x, cur_y, self.occupancy_map.shape)
+                for wall_x in range(cur_x - SCALED_DRONE_RADIUS, cur_x + SCALED_DRONE_RADIUS):
+                    for wall_y in range(cur_y - SCALED_DRONE_RADIUS, cur_y + SCALED_DRONE_RADIUS):
+                        if not (0 <= wall_x <= len(self.occupancy_map) and 0 <= wall_y <= len(self.occupancy_map[0])):
+                            continue
+                        if self.occupancy_map[wall_x][wall_y] >= 0:
+                            self.occupancy_map[wall_x][wall_y] = self.occupancy_map[wall_x][wall_y] + 1
+                        else:
+                            self.occupancy_map[wall_x][wall_y] = 1
+
+            # Update expected empty
+            if self.step_count % 10 == 0:
+                position = self.measured_fake_position()
+                angle = self.measured_fake_angle()
+                for i in range(0, 181):
+                    rad_angle = math.pi + angle + math.radians(2*i)
+                    cos_angle = math.cos(rad_angle)
+                    sin_angle = math.sin(rad_angle)
+                    for d in range(1, 302):
+                        next_position = (position[0] + d*cos_angle, position[1] + d*sin_angle)
+                        next_cell = self.pos_to_grid(next_position)
+                        if self.occupancy_map[next_cell[0]][next_cell[1]] >= 1:
+                            break
+                        else:
+                            self.occupancy_map[next_cell[0]][next_cell[1]] = 0
 
             # Heatmap for occupancy maps
             if self.step_count % 100 == 0:
@@ -311,12 +342,96 @@ class DroneSolutionV2(DroneAbstract):
         start = m.map[start_point[0]][start_point[1]]
         end = m.map[end_point[0]][end_point[1]]
         dstar = ds.Dstar(m)
-        print("dstar ok before")
+        print("dstar ok before", occupancy_map, start_point, end_point, threshold)
         rx, ry = dstar.run(start, end)
-        print("dstar ok after")
-        # print(rx, ry)
+        print("dstar ok after", rx, ry)
         return rx, ry
+    
+    def yoru_ni_kakeru(self): # Racing into the night
+        cur_position = self.measured_fake_position()
+        cur_grid = self.pos_to_grid(cur_position)
+        # BFS
+        non_discovered_points = []
+        dx = [-1, 0, 1, 0]
+        dy = [0, -1, 0, 1]
+        q = deque([cur_grid]) 
+        visited = np.zeros_like(self.occupancy_map)
+        visited[cur_grid[0], cur_grid[1]] = 1
+        # print(cur_position, cur_grid, q, self.occupancy_map)
+        while len(q):
+            cur_point = q.popleft()
+            for k in range(4):
+                nxt_point = cur_point[0] + dx[k], cur_point[1] + dy[k]
+                if not (0 <= nxt_point[0] < len(self.occupancy_map) and 0 <= nxt_point[1] < len(self.occupancy_map[0])):
+                    continue
+                # print("continue 1")
+                if visited[nxt_point[0], nxt_point[1]]:
+                    continue
+                # print("continue 2")
+                if self.occupancy_map[nxt_point[0], nxt_point[1]] == NON_DISCOVERED:
+                    non_discovered_points.append(nxt_point)
+                    continue
+                # print("continue 3")
+                if self.occupancy_map[nxt_point[0], nxt_point[1]] >= 1:
+                    continue
+                # print("continue 4")
+                visited[nxt_point[0], nxt_point[1]] = 1
+                q.append(nxt_point)
 
+        non_discovered_points = np.array(non_discovered_points)
+        print(f'Non discovered points: {non_discovered_points}')
+        if len(non_discovered_points) <= 1:
+            return
+        print(f'Average of non discovered points: {np.average(non_discovered_points, axis = 0)}')
+        average_point = tuple(np.average(non_discovered_points, axis = 0).astype(int))
+        if cur_grid == average_point: # without this doesnt work for some reasons
+            return
+        print(f'Start point: {cur_grid}', f'Dist point: {average_point}')
+        # thick_occupancy_map = np.copy(self.occupancy_map)
+        # thick_occupancy_map = scipy.ndimage.uniform_filter(self.occupancy_map, size=10, mode='constant')
+        # threshold = 10
+        # thick_occupancy_map[thick_occupancy_map < threshold] = 0
+        print(f'Start point type: {self.occupancy_map[cur_grid[0], cur_grid[1]]}')
+        print(f'Dist point type: {self.occupancy_map[average_point[0], average_point[1]]}')
+        if self.occupancy_map[cur_grid[0], cur_grid[1]] >= 1:
+            for dx in range(-3, 3):
+                for dy in range(-3, 3):
+                    if self.occupancy_map[cur_grid[0] + dx, cur_grid[1] + dy] != -1:
+                        cur_grid = cur_grid[0] + dx, cur_grid[1] + dy
+                        break
+                else:
+                    break
+        if self.occupancy_map[average_point[0], average_point[1]] >= 1:
+            for dx in range(-3, 3):
+                for dy in range(-3, 3):
+                    if self.occupancy_map[average_point[0] + dx, average_point[1] + dy] < 1:
+                        average_point = average_point[0] + dx, average_point[1] + dy
+                        break
+                else:
+                    break
+        rx, ry = self.shortest_path(self.occupancy_map, cur_grid, average_point)
+        # if self.step_count % 100 == 0:
+        #     plt.plot(rx, ry, "-r")
+        #     plt.draw()
+        #     print(rx, ry)
+
+        #Changeable
+        dest_x = 0
+        dest_y = 0
+        weighted_denominator = 0
+        for k in range(len(rx)):
+            dest_x += rx[k] * 1/(k+1)
+            dest_y += ry[k] * 1/(k+1)
+            weighted_denominator += 1/(k+1)
+        dest_x /= weighted_denominator
+        dest_y /= weighted_denominator
+        print('cur point: ', cur_grid[0], cur_grid[1])
+        print('dest point:', dest_x, dest_y)
+
+        dest_angle = np.arctan2(dest_y - cur_grid[1], dest_x - cur_grid[0])
+        print(f'dest angle {dest_angle}')
+        return dest_angle
+        
     def get_center_location(self):
         if self.center_location is not None:
             return self.center_location
@@ -349,9 +464,9 @@ class DroneSolutionV2(DroneAbstract):
 
 
     def control(self):
-        command = {"forward": 1.0,
+        command = {"forward": 0.0,
                    "lateral": 0.0,
-                   "rotation": 0.0,
+                   "rotation": 1.0,
                    "grasper": 0}
         
         self.fix_fake_position()
@@ -363,10 +478,11 @@ class DroneSolutionV2(DroneAbstract):
             plt.draw()
 
         self.gps_mapping()
-        if self.step_count % 10 == 0:
+        if self.step_count % 50 == 0:
             self.get_lidar_from_occupancy(self.measured_fake_position(), self.measured_fake_angle())
         
         if self.start:
+            self.goal_explore_angle = 1e9
             self.start = False
             self.init_dxy()
             return command
@@ -376,81 +492,99 @@ class DroneSolutionV2(DroneAbstract):
 
         semantic = self.semantic().get_sensor_values()
 
+        if self.step_count % 20 == 0:
+            self.goal_explore_angle = self.yoru_ni_kakeru()
+            # print(self.goal_explore_angle)
+        # input()
         # first, we find a command to work toward the goal
         if self.state or (self.lock and self.flag): command["grasper"] = 1
 
         if self.step_count % 100 == 0 and command["grasper"] == 1:
             start_point = self.pos_to_grid(self.measured_fake_position())
             end_point = self.pos_to_grid(self.center_location)
-            print("GO BACK AJHVDJHSVBDHS", start_point, end_point)
+            # print("GO BACK AJHVDJHSVBDHS", start_point, end_point)
             self.go_back_to_center()
-
-        if self.pending == 1:
-            # print("flag 1")
-            command["forward"] = 0.0
-            diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle())
-            command["rotation"] = 1
-            if abs(diff_angle) < 0.2:
-                # print("flag 1.1")
-                self.flag = 0
-                self.pending = 0
-
-        elif self.goal[1] == 0:
-            # print("flag 2")
-            if self.flag == 0:
-                # print("flag 2.1")
-                command["forward"] = 0.0
-                diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle())
-                command["rotation"] = -1.0 if diff_angle < 0 else 1.0
-                if abs(diff_angle) < 0.2:
-                    # print("flag 2.1.1")
-                    self.flag = 1
+        elif self.goal_explore_angle is not None and self.goal_explore_angle != 1e9:
+            print("START EXPLORING")
+            print(f'Current angle: {self.measured_fake_angle()}')
+            print(f'Goal angle: {self.goal_explore_angle}')
+            # input()
+            diff_angle = abs(self.goal_explore_angle - self.measured_fake_angle()[0])
+            if diff_angle < 0.2:
+                print("Eren Yeager")
+                command["forward"] = 1
+                command["rotation"] = 0
             else:
-                # print("flag 2.2")
-                if self.lock == 1:
-                    # print("flag 2.2.1")
-                    self.counter += 1
-                if self.counter >= 10:
-                    # print("flag 2.2.2")
-                    self.counter = 0
-                    self.lock = 0
+                command["forward"] = 0
+                command["rotation"] = 1
 
-        elif self.goal[1] == 1:
-            # print("flag 3")
-            if self.flag == 0:
-                # print("flag 3.1")
-                command["forward"] = 0.0
-                diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle() + math.pi/4)
-                command["rotation"] = -1.0 if diff_angle < 0 else 1.0
-                if abs(diff_angle) < 0.2:
-                    # print("flag 3.1.1")
-                    self.flag = 2
-            else:
-                # print("flag 3.2")
-                self.counter += 1
-                if self.counter >= 12:
-                    # print("flag 3.2.1")
-                    self.flag = 0
-                    self.goal[1] = 0
 
-        elif self.goal[1] == -1:
-            # print("flag 4")
-            if self.flag == 0:
-                # print("flag 4.1")
-                command["forward"] = 0.0
-                diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle() - math.pi/4)
-                command["rotation"] = -1.0 if diff_angle < 0 else 1.0
-                if abs(diff_angle) < 0.2:
-                    # print("flag 4.1.1")
-                    self.flag = 2
-            else:
-                # print("flag 4.2")
-                self.counter += 1
-                if self.counter >= 12:
-                    # print("flag 4.2.1")
-                    self.flag = 0
-                    self.counter = 0
-                    self.goal[1] = 0
+        # if self.pending == 1:
+        #     # print("flag 1")
+        #     command["forward"] = 0.0
+        #     diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle())
+        #     command["rotation"] = 1
+        #     if abs(diff_angle) < 0.2:
+        #         # print("flag 1.1")
+        #         self.flag = 0
+        #         self.pending = 0
+
+        # elif self.goal[1] == 0:
+        #     # print("flag 2")
+        #     if self.flag == 0:
+        #         # print("flag 2.1")
+        #         command["forward"] = 0.0
+        #         diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle())
+        #         command["rotation"] = -1.0 if diff_angle < 0 else 1.0
+        #         if abs(diff_angle) < 0.2:
+        #             # print("flag 2.1.1")
+        #             self.flag = 1
+        #     else:
+        #         # print("flag 2.2")
+        #         if self.lock == 1:
+        #             # print("flag 2.2.1")
+        #             self.counter += 1
+        #         if self.counter >= 10:
+        #             # print("flag 2.2.2")
+        #             self.counter = 0
+        #             self.lock = 0
+
+        # elif self.goal[1] == 1:
+        #     # print("flag 3")
+        #     if self.flag == 0:
+        #         # print("flag 3.1")
+        #         command["forward"] = 0.0
+        #         diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle() + math.pi/4)
+        #         command["rotation"] = -1.0 if diff_angle < 0 else 1.0
+        #         if abs(diff_angle) < 0.2:
+        #             # print("flag 3.1.1")
+        #             self.flag = 2
+        #     else:
+        #         # print("flag 3.2")
+        #         self.counter += 1
+        #         if self.counter >= 12:
+        #             # print("flag 3.2.1")
+        #             self.flag = 0
+        #             self.goal[1] = 0
+
+        # elif self.goal[1] == -1:
+        #     # print("flag 4")
+        #     if self.flag == 0:
+        #         # print("flag 4.1")
+        #         command["forward"] = 0.0
+        #         diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle() - math.pi/4)
+        #         command["rotation"] = -1.0 if diff_angle < 0 else 1.0
+        #         if abs(diff_angle) < 0.2:
+        #             # print("flag 4.1.1")
+        #             self.flag = 2
+        #     else:
+        #         # print("flag 4.2")
+        #         self.counter += 1
+        #         if self.counter >= 12:
+        #             # print("flag 4.2.1")
+        #             self.flag = 0
+        #             self.counter = 0
+        #             self.goal[1] = 0
 
         # then, we update our state
         if self.state == 0 and self.base.grasper.grasped_entities:
@@ -469,7 +603,7 @@ class DroneSolutionV2(DroneAbstract):
             self.counter = 0
             if self.debug:
                 print('new goal!', b)
-                input()
+                # input()
             self.limit = 0
 
         self.limit += 1
@@ -492,114 +626,114 @@ class DroneSolutionV2(DroneAbstract):
         # plt.pause(0.1)
         return command
     
-    def control_old(self):
-        command = {"forward": 1.0,
-                   "lateral": 0.0,
-                   "rotation": 0.0,
-                   "grasper": 0}
+    # def control_old(self):
+    #     command = {"forward": 1.0,
+    #                "lateral": 0.0,
+    #                "rotation": 0.0,
+    #                "grasper": 0}
         
-        self.fix_fake_position()
+    #     self.fix_fake_position()
 
-        self.gps_mapping()
-        if self.step_count % 10 == 0:
-            self.get_lidar_from_occupancy(self.measured_fake_position(), self.measured_fake_angle())
+    #     self.gps_mapping()
+    #     if self.step_count % 10 == 0:
+    #         self.get_lidar_from_occupancy(self.measured_fake_position(), self.measured_fake_angle())
         
-        if self.start:
-            self.start = False
-            self.init_dxy()
-            return command
+    #     if self.start:
+    #         self.start = False
+    #         self.init_dxy()
+    #         return command
 
-        lidar = np.array(self.lidar().get_sensor_values())
-        lidar = lidar[:-1]
+    #     lidar = np.array(self.lidar().get_sensor_values())
+    #     lidar = lidar[:-1]
 
-        semantic = self.semantic().get_sensor_values()
+    #     semantic = self.semantic().get_sensor_values()
 
-        # first, we find a command to work toward the goal
-        if self.state or (self.lock and self.flag): command["grasper"] = 1
+    #     # first, we find a command to work toward the goal
+    #     if self.state or (self.lock and self.flag): command["grasper"] = 1
 
-        if self.pending == 1:
-            command["forward"] = 0.0
-            diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle())
-            command["rotation"] = 1
-            if abs(diff_angle) < 0.2:
-                self.flag = 0
-                self.pending = 0
+    #     if self.pending == 1:
+    #         command["forward"] = 0.0
+    #         diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle())
+    #         command["rotation"] = 1
+    #         if abs(diff_angle) < 0.2:
+    #             self.flag = 0
+    #             self.pending = 0
 
-        elif self.goal[1] == 0:
-            if self.flag == 0:
-                command["forward"] = 0.0
-                diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle())
-                command["rotation"] = -1.0 if diff_angle < 0 else 1.0
-                if abs(diff_angle) < 0.2:
-                    self.flag = 1
-            else:
-                if self.lock == 1: self.counter += 1
-                if self.counter >= 10:
-                    self.counter = 0
-                    self.lock = 0
+    #     elif self.goal[1] == 0:
+    #         if self.flag == 0:
+    #             command["forward"] = 0.0
+    #             diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle())
+    #             command["rotation"] = -1.0 if diff_angle < 0 else 1.0
+    #             if abs(diff_angle) < 0.2:
+    #                 self.flag = 1
+    #         else:
+    #             if self.lock == 1: self.counter += 1
+    #             if self.counter >= 10:
+    #                 self.counter = 0
+    #                 self.lock = 0
 
-        elif self.goal[1] == 1:
-            if self.flag == 0:
-                command["forward"] = 0.0
-                diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle() + math.pi/4)
-                command["rotation"] = -1.0 if diff_angle < 0 else 1.0
-                if abs(diff_angle) < 0.2:
-                    self.flag = 2
-            else:
-                self.counter += 1
-                if self.counter >= 12:
-                    self.flag = 0
-                    self.goal[1] = 0
+    #     elif self.goal[1] == 1:
+    #         if self.flag == 0:
+    #             command["forward"] = 0.0
+    #             diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle() + math.pi/4)
+    #             command["rotation"] = -1.0 if diff_angle < 0 else 1.0
+    #             if abs(diff_angle) < 0.2:
+    #                 self.flag = 2
+    #         else:
+    #             self.counter += 1
+    #             if self.counter >= 12:
+    #                 self.flag = 0
+    #                 self.goal[1] = 0
 
-        elif self.goal[1] == -1:
-            if self.flag == 0:
-                command["forward"] = 0.0
-                diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle() - math.pi/4)
-                command["rotation"] = -1.0 if diff_angle < 0 else 1.0
-                if abs(diff_angle) < 0.2:
-                    self.flag = 2
-            else:
-                self.counter += 1
-                if self.counter >= 12:
-                    self.flag = 0
-                    self.counter = 0
-                    self.goal[1] = 0
+    #     elif self.goal[1] == -1:
+    #         if self.flag == 0:
+    #             command["forward"] = 0.0
+    #             diff_angle = normalize_angle(self.goal[0] - self.measured_fake_angle() - math.pi/4)
+    #             command["rotation"] = -1.0 if diff_angle < 0 else 1.0
+    #             if abs(diff_angle) < 0.2:
+    #                 self.flag = 2
+    #         else:
+    #             self.counter += 1
+    #             if self.counter >= 12:
+    #                 self.flag = 0
+    #                 self.counter = 0
+    #                 self.goal[1] = 0
 
-        # then, we update our state
-        if self.state == 0 and self.base.grasper.grasped_entities:
-            self.lock = 0
-            self.state = 1
+    #     # then, we update our state
+    #     if self.state == 0 and self.base.grasper.grasped_entities:
+    #         self.lock = 0
+    #         self.state = 1
 
-        elif self.state == 1 and not self.base.grasper.grasped_entities:
-            self.lock = 0
-            self.state = 0
+    #     elif self.state == 1 and not self.base.grasper.grasped_entities:
+    #         self.lock = 0
+    #         self.state = 0
         
-        # then, call new
-        a, b = self.new(lidar, semantic)
-        if a:
-            self.goal = [normalize_angle(b[0]+self.measured_fake_angle()), b[1]]
-            self.flag = 0
-            self.counter = 0
-            if self.debug:
-                print('new goal!', b)
-                input()
-            self.limit = 0
+    #     # then, call new
+    #     a, b = self.new(lidar, semantic)
+    #     if a:
+    #         self.goal = [normalize_angle(b[0]+self.measured_fake_angle()), b[1]]
+    #         self.flag = 0
+    #         self.counter = 0
+    #         if self.debug:
+    #             print('new goal!', b)
+    #             # input()
+    #         self.limit = 0
 
-        self.limit += 1
-        if self.limit >= 180:
-            print('limit reached!')
-            a, b = self.new(lidar, semantic)
-            self.goal = [normalize_angle(b[0]+self.measured_fake_angle()), b[1]]
-            self.limit = 0
-            self.state = 0
-            self.flag = 0
-            self.counter = 0
+    #     self.limit += 1
+    #     if self.limit >= 180:
+    #         print('limit reached!')
+    #         a, b = self.new(lidar, semantic)
+    #         self.goal = [normalize_angle(b[0]+self.measured_fake_angle()), b[1]]
+    #         self.limit = 0
+    #         self.state = 0
+    #         self.flag = 0
+    #         self.counter = 0
         
-        # print(self.prev_position, self.measeured_fake_position())
+    #     # print(self.prev_position, self.measeured_fake_position())
 
-        #update prev_angle
-        self.prev_position = self.measured_fake_position()
-        self.prev_angle = self.measured_fake_angle()
+    #     #update prev_angle
+    #     self.prev_position = self.measured_fake_position()
+    #     self.prev_angle = self.measured_fake_angle()
 
-        # return
-        return command
+    #     # return
+    #     return command
